@@ -84,6 +84,7 @@ public sealed class SqlServerJobTimeline : IJobTimelineStore, IAsyncDisposable
         await using var connection = new SqlConnection(_options.ConnectionString);
         await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
         await using var transaction = (SqlTransaction)await connection.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken).ConfigureAwait(false);
+        await AcquireExecutionLockAsync(connection, transaction, jobEvent.ExecutionId, cancellationToken).ConfigureAwait(false);
 
         var existingEvent = await GetEventByIdentityAsync(connection, transaction, jobEvent, cancellationToken).ConfigureAwait(false);
         if (existingEvent is not null)
@@ -146,6 +147,27 @@ public sealed class SqlServerJobTimeline : IJobTimelineStore, IAsyncDisposable
         Add(command, "@eventId", SqlDbType.UniqueIdentifier, jobEvent.EventId);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
         return await reader.ReadAsync(cancellationToken).ConfigureAwait(false) ? ReadEvent(reader) : null;
+    }
+
+    private static async Task AcquireExecutionLockAsync(SqlConnection connection, SqlTransaction transaction, Guid executionId, CancellationToken cancellationToken)
+    {
+        const string sql = """
+            DECLARE @lockResult int;
+            EXEC @lockResult = sp_getapplock
+                @Resource = @resource,
+                @LockMode = N'Exclusive',
+                @LockOwner = N'Transaction',
+                @LockTimeout = 30000;
+            SELECT @lockResult;
+            """;
+
+        await using var command = CreateCommand(sql, connection, transaction);
+        Add(command, "@resource", SqlDbType.NVarChar, $"JobTimeline.Execution.{executionId:N}", 128);
+        var result = Convert.ToInt32(await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false));
+        if (result < 0)
+        {
+            throw new InvalidOperationException("Could not acquire the execution append lock.");
+        }
     }
 
     private static async Task EnsureSourcePositionIsUniqueAsync(SqlConnection connection, SqlTransaction transaction, JobEvent jobEvent, CancellationToken cancellationToken)
