@@ -12,5 +12,6 @@ public enum JobEventType
     Succeeded,
     Failed,
     Cancelled,
-    TimedOut
+    TimedOut,
+    Submitted
 }
