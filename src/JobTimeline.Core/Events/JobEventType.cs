@@ -2,7 +2,6 @@ namespace JobTimeline.Core.Events;
 
 public enum JobEventType
 {
-    Submitted,
     Enqueued,
     Received,
     Started,
@@ -13,5 +12,6 @@ public enum JobEventType
     Succeeded,
     Failed,
     Cancelled,
-    TimedOut
+    TimedOut,
+    Submitted
 }

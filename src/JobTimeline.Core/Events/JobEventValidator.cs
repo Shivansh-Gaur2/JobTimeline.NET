@@ -31,6 +31,11 @@ public static class JobEventValidator
             throw new ArgumentException("An attempt number must be at least one.", nameof(jobEvent));
         }
 
+        if (jobEvent.OccurredAtUtc.Offset != TimeSpan.Zero)
+        {
+            throw new ArgumentException("The occurrence timestamp must use a UTC offset.", nameof(jobEvent));
+        }
+
         if (jobEvent.SourceSequence is not null && string.IsNullOrWhiteSpace(jobEvent.SourceStream))
         {
             throw new ArgumentException("A source stream is required when a source sequence is supplied.", nameof(jobEvent));
