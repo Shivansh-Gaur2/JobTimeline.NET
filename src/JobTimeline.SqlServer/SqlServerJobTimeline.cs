@@ -9,6 +9,7 @@ namespace JobTimeline.SqlServer;
 
 public sealed class SqlServerJobTimeline : IJobTimelineStore, IAsyncDisposable
 {
+    private const int MaximumDeadlockRetries = 3;
     private readonly SqlServerJobTimelineOptions _options;
     private readonly IJobEventSanitizer _sanitizer;
     private readonly TimeProvider _timeProvider;
@@ -61,6 +62,23 @@ public sealed class SqlServerJobTimeline : IJobTimelineStore, IAsyncDisposable
     {
         jobEvent = _sanitizer.Sanitize(jobEvent);
         JobEventValidator.Validate(jobEvent);
+
+        for (var retryAttempt = 0; ; retryAttempt++)
+        {
+            try
+            {
+                return await AppendOnceAsync(jobEvent, cancellationToken).ConfigureAwait(false);
+            }
+            catch (SqlException exception) when (exception.Number == 1205 && retryAttempt < MaximumDeadlockRetries)
+            {
+                var delay = TimeSpan.FromMilliseconds(25 * (1 << retryAttempt));
+                await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
+            }
+        }
+    }
+
+    private async ValueTask<AppendJobEventResult> AppendOnceAsync(JobEvent jobEvent, CancellationToken cancellationToken)
+    {
         await InitializeAsync(cancellationToken).ConfigureAwait(false);
 
         await using var connection = new SqlConnection(_options.ConnectionString);
